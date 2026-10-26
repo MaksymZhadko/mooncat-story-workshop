@@ -12,10 +12,10 @@ Read the generic [workflow](docs/WORKFLOW.md). Personal guides, project instruct
 
 ## Publish the tool with GitHub Pages
 
-1. Create a repository such as `mooncat-story-workshop` under your own account. No repository or hosted website has been created by this delivery.
+1. Create or reuse a repository under your own account. Publishing remains a separate step from storing code.
 2. Upload **only** `site/`, `tests/`, `.github/`, `.gitignore`, `package.json`, `README.md` and `docs/`. Review the staged file list. Never upload the entire ZIP or `private/`. `.gitignore` does not protect files manually uploaded through GitHub's website, or files already committed.
 3. In repository **Settings → Pages**, choose **GitHub Actions** as the publishing source.
-4. Run the **Publish workshop shell** workflow manually. It tests and deploys only `site/`.
+4. After approving public hosting, add the proposed **Publish workshop shell** workflow from the download package, then run it manually. It tests and deploys only `site/`. Public publishing is not enabled in the prepared private repository.
 5. Use the Pages URL reported by GitHub. No guessed live URL is supplied here.
 
 The Pages workflow has manual dispatch only. Changing data locally never changes the hosted shell. GitHub Pages is public web hosting in the usual configuration, including many private-repository setups. It is not your private manuscript database. Keep the private backup outside the public repository, optionally in a separate private repository with access you control.
