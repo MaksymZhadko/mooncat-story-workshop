@@ -1,5 +1,7 @@
 # Moon Cat Story Workshop
 
+[Open the live workshop](https://maksymzhadko.github.io/mooncat-story-workshop/)
+
 A local-first workshop for continuity, campaign memories, resources, narrative testing and release preparation. The public website is an empty tool shell. Private play history is imported on your device.
 
 ## Start now
