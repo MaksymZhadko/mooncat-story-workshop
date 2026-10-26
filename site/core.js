@@ -1,6 +1,6 @@
 (function(root){
  'use strict';
- const listNames=['sessions','issues','tests','rights','events','entities','resources','decisions','retcons','catalog','browserSnapshots'];
+ const listNames=['sessions','issues','tests','rights','events','entities','resources','decisions','retcons','catalog','browserSnapshots','projects','projectChats','workProgress','progressLog'];
  function empty(){return {schemaVersion:1,created:new Date().toISOString(),scope:{statement:'Local workshop. Coverage is determined per session.'},...Object.fromEntries(listNames.map(k=>[k,[]]))};}
  function validate(input){
   if(!input||typeof input!=='object'||Array.isArray(input)||input.schemaVersion!==1)throw Error('Expected a workshop JSON file with schemaVersion 1.');
@@ -9,6 +9,7 @@
   if(input.scope&&typeof input.scope==='object')d.scope=input.scope;
   d.created=typeof input.created==='string'?input.created:d.created;
   const ids=new Set();for(const s of d.sessions){if(!s||typeof s.id!=='string'||!s.id||typeof s.title!=='string')throw Error('Each session needs an ID and title.');if(ids.has(s.id))throw Error('Duplicate session ID: '+s.id);ids.add(s.id);s.flags=Array.isArray(s.flags)?s.flags:[];}
+  for(const p of d.workProgress){if(typeof p.itemId!=='string'||!p.stages||typeof p.stages!=='object'||Array.isArray(p.stages)||Object.entries(p.stages).some(([k,v])=>!stages.includes(k)||!progressStates.includes(v)))throw Error('Invalid work progress record.');}
   return d;
  }
  function checks(d,sessionId){
@@ -77,6 +78,32 @@
   d.browserSnapshots.push(record);
   return {data:d,added:true,notice:'Browser checkpoint added locally. Captured prose is evidence, not approved canon or a completed review.'};
  }
- const api={empty,validate,checks,releaseReasons,publicExport,checkpoint,mergeCheckpoint};
+ const stages=['Review','Canon','Test drive','Revision'];
+ const progressStates=['Not started','In progress','Blocked','Done','Not applicable'];
+ function workItems(d){
+  const items=new Map();
+  for(const s of d.sessions){const id='ooc:'+(s.storyId||s.id);if(!items.has(id))items.set(id,{id,title:s.title,projectId:'ooc',sourceUrl:s.sourceUrl,sessions:[]});items.get(id).sessions.push(s);}
+  for(const t of d.catalog){const id='ooc:'+t.storyId;if(!items.has(id))items.set(id,{id,title:t.title,projectId:'ooc',sourceUrl:t.sourceUrl,sessions:[]});Object.assign(items.get(id),{authored:true,visibility:t.visibility});}
+  for(const c of d.projectChats)items.set('chat:'+c.id,{...c,id:'chat:'+c.id,chatId:c.id,sessions:[]});
+  return [...items.values()];
+ }
+ function progress(d,itemId){const p=d.workProgress.find(x=>x.itemId===itemId);const values=stages.map(k=>p?.stages?.[k]||'Not started');const applicable=values.filter(x=>x!=='Not applicable');const done=applicable.filter(x=>x==='Done').length;return {record:p,done,total:applicable.length,percent:applicable.length?Math.round(done/applicable.length*100):null};}
+ function recordProgress(input,itemId,patch){
+  const d=validate(JSON.parse(JSON.stringify(input)));if(!workItems(d).some(x=>x.id===itemId))throw Error('Unknown title or chat.');
+  let p=d.workProgress.find(x=>x.itemId===itemId);if(!p){p={id:'WORK-'+(d.workProgress.length+1),itemId,stages:{}};d.workProgress.push(p);}
+  const before=JSON.parse(JSON.stringify(p));
+  if(patch.stage!==undefined){if(!stages.includes(patch.stage)||!progressStates.includes(patch.status))throw Error('Invalid progress stage or status.');p.stages[patch.stage]=patch.status;}
+  for(const k of ['checkpoint','nextAction','version','sourceRef'])if(patch[k]!==undefined){if(typeof patch[k]!=='string'||patch[k].length>10000)throw Error('Invalid '+k);p[k]=patch[k];}
+  p.updatedAt=new Date().toISOString();d.progressLog.push({id:'LOG-'+Date.now()+'-'+d.progressLog.length,itemId,at:p.updatedAt,before,after:JSON.parse(JSON.stringify(p))});return d;
+ }
+ function mergeProjectIndex(input,packet){
+  if(!packet||packet.schemaVersion!==1||packet.kind!=='project-workshop-index'||!Array.isArray(packet.projects)||!Array.isArray(packet.projectChats))throw Error('Expected a project-workshop-index packet.');
+  const d=validate(JSON.parse(JSON.stringify(input))),stamp=Date.parse(packet.capturedAt);if(!Number.isFinite(stamp)||stamp>Date.now()+300000)throw Error('Invalid project capture time.');
+  const seen=new Set();
+  for(const p of packet.projects){if(!p||typeof p.id!=='string'||seen.has(p.id)||!/^https:\/\/chatgpt\.com\/g\/g-p-[a-f0-9]{32}[^/]*\/project$/.test(p.sourceUrl)||typeof p.title!=='string')throw Error('Invalid project record.');seen.add(p.id);if(p.sources&&!Array.isArray(p.sources))throw Error('Invalid source inventory.');const old=d.projects.find(x=>x.id===p.id);if(old&&Date.parse(old.capturedAt)>stamp)throw Error('Older project index rejected.');const row={...p,capturedAt:new Date(stamp).toISOString()};if(old)Object.assign(old,row);else d.projects.push(row);}
+  const chatSeen=new Set();for(const c of packet.projectChats){const p=packet.projects.find(x=>x.id===c.projectId);if(!p||!c.id||chatSeen.has(c.id)||typeof c.title!=='string'||!/^https:\/\/chatgpt\.com\/g\/g-p-[a-f0-9]{32}\/c\/[a-f0-9-]{36}$/.test(c.sourceUrl))throw Error('Invalid chat record.');const projectPath=new URL(p.sourceUrl).pathname.match(/g-p-([a-f0-9]{32})/)[1];if(!new URL(c.sourceUrl).pathname.includes('g-p-'+projectPath+'/c/'))throw Error('Chat does not belong to its stated project.');chatSeen.add(c.id);const old=d.projectChats.find(x=>x.id===c.id);if(old)Object.assign(old,c,{indexedAt:new Date(stamp).toISOString()});else d.projectChats.push({...c,indexedAt:new Date(stamp).toISOString()});}
+  return d;
+ }
+ const api={empty,validate,checks,releaseReasons,publicExport,checkpoint,mergeCheckpoint,stages,progressStates,workItems,progress,recordProgress,mergeProjectIndex};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.StoryCore=api;
 })(typeof window!=='undefined'?window:this);
