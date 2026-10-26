@@ -1,0 +1,1 @@
+{"name":"sin-story-workshop","version":"1.0.0","private":true,"scripts":{"test":"node --test tests/*.test.cjs","check":"node --check site/core.js && node --check site/app.js"}}
