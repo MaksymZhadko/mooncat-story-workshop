@@ -1,6 +1,6 @@
 (function(root){
  'use strict';
- const listNames=['sessions','issues','tests','rights','events','entities','resources','decisions','retcons'];
+ const listNames=['sessions','issues','tests','rights','events','entities','resources','decisions','retcons','catalog','browserSnapshots'];
  function empty(){return {schemaVersion:1,created:new Date().toISOString(),scope:{statement:'Local workshop. Coverage is determined per session.'},...Object.fromEntries(listNames.map(k=>[k,[]]))};}
  function validate(input){
   if(!input||typeof input!=='object'||Array.isArray(input)||input.schemaVersion!==1)throw Error('Expected a workshop JSON file with schemaVersion 1.');
@@ -48,6 +48,35 @@
   const stories=ids.map(id=>{const reasons=releaseReasons(d,id);if(reasons.length)throw Error(id+': '+reasons.join(' '));const s=d.sessions.find(x=>x.id===id);return {id:s.id,title:s.title,synopsis:s.publicSynopsis};});
   return {schemaVersion:1,kind:'public-story-catalogue',created:new Date().toISOString(),stories};
  }
- const api={empty,validate,checks,releaseReasons,publicExport};
+ function checkpoint(input){
+  if(!input||input.kind!=='ooc-browser-checkpoint'||input.schemaVersion!==1)throw Error('Expected an OOC browser checkpoint, schemaVersion 1.');
+  const stamp=Date.parse(input.capturedAt);if(!Number.isFinite(stamp)||stamp>Date.now()+300000)throw Error('Capture time is invalid or in the future.');
+  let url;try{url=new URL(input.sourceUrl);}catch{throw Error('Checkpoint source URL is invalid.');}
+  if(url.origin!=='https://ooc.ai'||url.search||url.hash)throw Error('Only canonical https://ooc.ai source URLs are accepted.');
+  const c={schemaVersion:1,kind:input.kind,capturedAt:new Date(stamp).toISOString(),sourceUrl:url.href,captureType:input.captureType,coverage:String(input.coverage||'Visible browser content only.').slice(0,2000)};
+  const match=url.pathname.match(/^\/story\/([a-f0-9]{24})(?:\/episode\/([a-f0-9]{24}))?$/);
+  if(c.captureType==='catalog'){
+   if(url.pathname!=='/my-title'||!Array.isArray(input.titles)||input.titles.length>1000)throw Error('A title-list checkpoint needs My Titles and a titles array.');
+   const seen=new Set();c.titles=input.titles.map(t=>{if(!t||!/^([a-f0-9]{24})$/.test(t.storyId)||typeof t.title!=='string'||!t.title.trim()||t.title.length>500||t.sourceUrl!==`https://ooc.ai/story/${t.storyId}`||!['Public','Private','Unknown'].includes(t.visibility)||seen.has(t.storyId))throw Error('Invalid or duplicate title record.');seen.add(t.storyId);return {storyId:t.storyId,title:t.title,sourceUrl:t.sourceUrl,visibility:t.visibility};});
+  }else{
+   if(!match||!['story','session'].includes(c.captureType)||(c.captureType==='session')!==!!match[2])throw Error('Capture type does not match the story or episode URL.');
+   if(typeof input.visibleText!=='string'||!input.visibleText.trim()||input.visibleText.length>100000)throw Error('Visible text must contain 1–100,000 characters.');
+   c.storyId=match[1];if(match[2])c.episodeId=match[2];c.title=String(input.title||'OOC capture').slice(0,500);c.visibleText=input.visibleText;
+  }
+  return c;
+ }
+ function mergeCheckpoint(input,packet){
+  const d=validate(JSON.parse(JSON.stringify(input))),c=checkpoint(packet);
+  const prior=d.browserSnapshots.filter(x=>x.sourceUrl===c.sourceUrl).sort((a,b)=>Date.parse(b.capturedAt)-Date.parse(a.capturedAt))[0];
+  if(prior&&Date.parse(c.capturedAt)<Date.parse(prior.capturedAt))throw Error('This checkpoint is older than the latest capture for this exact page.');
+  const same=prior&&prior.captureType===c.captureType&&JSON.stringify(prior.titles||prior.visibleText)===JSON.stringify(c.titles||c.visibleText);
+  if(same){prior.capturedAt=c.capturedAt;return {data:d,added:false,notice:'Unchanged page checked again. Canon and review coverage were not changed.'};}
+  const record={...c,id:'CAP-'+Date.parse(c.capturedAt)+'-'+(d.browserSnapshots.length+1)};
+  if(c.captureType==='catalog')for(const t of c.titles){const entry={...t,id:t.storyId,lastSeen:c.capturedAt};const i=d.catalog.findIndex(x=>x.storyId===t.storyId);if(i<0)d.catalog.push(entry);else d.catalog[i]={...d.catalog[i],...entry};}
+  if(c.captureType==='session'){const s=d.sessions.find(x=>x.sourceUrl===c.sourceUrl);if(s)record.sessionId=s.id;}
+  d.browserSnapshots.push(record);
+  return {data:d,added:true,notice:'Browser checkpoint added locally. Captured prose is evidence, not approved canon or a completed review.'};
+ }
+ const api={empty,validate,checks,releaseReasons,publicExport,checkpoint,mergeCheckpoint};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.StoryCore=api;
 })(typeof window!=='undefined'?window:this);
